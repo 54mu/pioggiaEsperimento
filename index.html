@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Previsione Giorni di Pioggia</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@sgratzl/chartjs-chart-boxplot/build/index.umd.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .chart-container {
+            position: relative;
+            height: 45vh;
+            width: 100%;
+        }
+        /* Stile per lo slider */
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #22d3ee; /* cyan-400 */
+            cursor: pointer;
+            border-radius: 50%;
+        }
+        input[type=range]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            background: #22d3ee;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-3xl mx-auto bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8 space-y-6">
+        <!-- Sezione Titolo e Input -->
+        <div class="text-center">
+            <h1 class="text-3xl md:text-4xl font-bold text-cyan-400">Previsione Giorni di Pioggia</h1>
+            <p class="text-gray-400 mt-2">Analizza i dati storici dal 2010 per prevedere le piogge future.</p>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-3">
+            <input type="text" id="location-input" placeholder="Inserisci una località (es. Roma, Milano...)" class="flex-grow bg-gray-700 border border-gray-600 text-white rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 focus:outline-none transition duration-300">
+            <button id="search-btn" class="bg-cyan-500 hover:bg-cyan-600 text-gray-900 font-bold py-3 px-6 rounded-lg transition duration-300 flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                Analizza
+            </button>
+        </div>
+
+        <!-- Pannello Impostazioni Avanzate -->
+        <details class="bg-gray-900/50 rounded-lg p-4 transition">
+            <summary class="cursor-pointer font-semibold text-cyan-400">Impostazioni Avanzate</summary>
+            <div class="mt-4 space-y-6 border-t border-gray-700 pt-4">
+                <div>
+                    <label for="threshold-slider" class="block mb-2 font-medium text-gray-300">Soglia minima di pioggia: <span id="threshold-value" class="font-bold text-cyan-400">0.2</span> mm/ora</label>
+                    <input id="threshold-slider" type="range" min="0.1" max="2.0" value="0.2" step="0.1" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                </div>
+                <div>
+                    <label class="block mb-3 font-medium text-gray-300">Seleziona fasce orarie di interesse</label>
+                    <div id="hours-grid" class="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-12 gap-2"></div>
+                    <div class="flex gap-2 mt-3">
+                        <button id="select-all-hours" class="text-xs bg-gray-600 hover:bg-gray-500 px-2 py-1 rounded">Seleziona Tutti</button>
+                        <button id="deselect-all-hours" class="text-xs bg-gray-600 hover:bg-gray-500 px-2 py-1 rounded">Deseleziona Tutti</button>
+                    </div>
+                </div>
+            </div>
+        </details>
+
+        <!-- Sezione Loader e Messaggi -->
+        <div id="loader" class="text-center py-8 hidden">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-400 mx-auto"></div>
+            <p class="mt-4 text-gray-400">Sto recuperando e analizzando oltre 15 anni di dati... Potrebbe volerci un momento.</p>
+        </div>
+        <div id="error-message" class="text-center p-4 bg-red-900/50 border border-red-700 rounded-lg hidden"></div>
+
+        <!-- Sezione Risultati -->
+        <div id="results-container" class="space-y-8 hidden">
+            <h2 class="text-2xl font-semibold text-center">Risultati per: <span id="result-location" class="text-cyan-400"></span></h2>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-center">
+                <div class="bg-gray-700/50 p-4 rounded-xl"><p class="text-sm text-gray-400">Pioggia di Ieri</p><p class="text-2xl font-bold text-white mt-1"><span id="yesterday-rain">--</span> mm</p></div>
+                <div class="bg-gray-700/50 p-4 rounded-xl"><p class="text-sm text-gray-400">Previsione per Oggi</p><p class="text-2xl font-bold text-white mt-1"><span id="today-forecast">--</span> mm</p></div>
+            </div>
+
+            <div class="bg-gray-700/50 p-6 rounded-xl text-center">
+                <p class="text-lg text-gray-400">Totale Giorni di Pioggia Previsti (Mediana)</p>
+                <p id="total-days" class="text-5xl font-bold text-white mt-2">--</p>
+            </div>
+            
+            <div><h3 class="text-xl font-semibold mb-4 text-center">Distribuzione Mensile Prevista</h3><div class="chart-container bg-gray-800 p-4 rounded-lg"><canvas id="prediction-chart"></canvas></div></div>
+            <div><h3 class="text-xl font-semibold mb-4 text-center">Dettaglio Storico (dal 2010)</h3><div class="chart-container bg-gray-800 p-4 rounded-lg"><canvas id="historical-chart"></canvas></div></div>
+            
+            <div class="text-xs text-gray-500 text-center border-t border-gray-700 pt-4 space-y-1">
+                <p id="methodology-text"></p>
+                <p id="definition-text"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Riferimenti DOM
+        const locationInput = document.getElementById('location-input');
+        const searchBtn = document.getElementById('search-btn');
+        const loader = document.getElementById('loader');
+        const errorMessage = document.getElementById('error-message');
+        const resultsContainer = document.getElementById('results-container');
+        const resultLocation = document.getElementById('result-location');
+        const totalDaysElement = document.getElementById('total-days');
+        const yesterdayRainElement = document.getElementById('yesterday-rain');
+        const todayForecastElement = document.getElementById('today-forecast');
+        const predictionChartCanvas = document.getElementById('prediction-chart');
+        const historicalChartCanvas = document.getElementById('historical-chart');
+        const methodologyTextElement = document.getElementById('methodology-text');
+        const definitionTextElement = document.getElementById('definition-text');
+        const thresholdSlider = document.getElementById('threshold-slider');
+        const thresholdValue = document.getElementById('threshold-value');
+        const hoursGrid = document.getElementById('hours-grid');
+        const selectAllHoursBtn = document.getElementById('select-all-hours');
+        const deselectAllHoursBtn = document.getElementById('deselect-all-hours');
+
+        let predictionChart = null;
+        let historicalChart = null;
+
+        const formatDate = (date) => date.toISOString().split('T')[0];
+        const formatDateForDisplay = (date) => date.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+        function initializeUI() {
+            const defaultHours = [7, 8, 9, 13, 14, 15, 16, 17, 18, 19];
+            for (let i = 0; i < 24; i++) {
+                const hourDiv = document.createElement('div');
+                const hourInput = document.createElement('input');
+                const hourLabel = document.createElement('label');
+                hourInput.type = 'checkbox'; hourInput.id = `hour-${i}`; hourInput.value = i; hourInput.className = 'hidden peer';
+                if (defaultHours.includes(i)) hourInput.checked = true;
+                hourLabel.htmlFor = `hour-${i}`; hourLabel.textContent = i.toString().padStart(2, '0');
+                hourLabel.className = 'w-full text-center p-2 block rounded-md cursor-pointer bg-gray-700 peer-checked:bg-cyan-500 peer-checked:text-gray-900 font-mono transition-colors duration-200';
+                hourDiv.appendChild(hourInput); hourDiv.appendChild(hourLabel); hoursGrid.appendChild(hourDiv);
+            }
+            thresholdSlider.addEventListener('input', (e) => { thresholdValue.textContent = parseFloat(e.target.value).toFixed(1); });
+            selectAllHoursBtn.addEventListener('click', () => setAllHours(true));
+            deselectAllHoursBtn.addEventListener('click', () => setAllHours(false));
+            searchBtn.addEventListener('click', handleSearch);
+            locationInput.addEventListener('keyup', (event) => { if (event.key === 'Enter') handleSearch(); });
+        }
+        
+        function setAllHours(checked) {
+            document.querySelectorAll('#hours-grid input[type="checkbox"]').forEach(cb => cb.checked = checked);
+        }
+
+        async function handleSearch() {
+            const location = locationInput.value.trim();
+            if (!location) { showError('Per favore, inserisci una località.'); return; }
+            const precipitationThreshold = parseFloat(thresholdSlider.value);
+            const selectedHours = Array.from(document.querySelectorAll('#hours-grid input:checked')).map(cb => parseInt(cb.value));
+            if (selectedHours.length === 0) { showError('Per favore, seleziona almeno una fascia oraria.'); return; }
+            
+            resultsContainer.classList.add('hidden'); errorMessage.classList.add('hidden'); loader.classList.remove('hidden');
+            searchBtn.disabled = true; searchBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            
+            try {
+                const coords = await getCoordinates(location);
+                if (!coords) { showError(`Località non trovata: "${location}". Prova con un nome più specifico.`); return; }
+                resultLocation.textContent = coords.name;
+                const [historicalData, realtimeData] = await Promise.all([
+                    getHistoricalPrecipitation(coords.latitude, coords.longitude, precipitationThreshold, selectedHours),
+                    getRealtimeData(coords.latitude, coords.longitude)
+                ]);
+                displayResults(historicalData, realtimeData, precipitationThreshold, selectedHours);
+            } catch (error) {
+                console.error("Errore durante il processo:", error);
+                showError('Si è verificato un errore imprevisto. Riprova più tardi.');
+            } finally {
+                loader.classList.add('hidden'); searchBtn.disabled = false; searchBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        async function getCoordinates(location) {
+            const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1&language=it&format=json`;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error('Errore API di geocodifica');
+            const data = await response.json();
+            if (data.results && data.results.length > 0) {
+                const { latitude, longitude, name, admin1, country } = data.results[0];
+                return { latitude, longitude, name: `${name}, ${admin1 || country}` };
+            }
+            return null;
+        }
+
+        async function getRealtimeData(latitude, longitude) {
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&hourly=precipitation&past_days=1&forecast_days=1&timezone=Europe/Berlin`;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error('Errore nel recuperare i dati di oggi e ieri.');
+            const data = await response.json();
+            const todayStr = new Date().toISOString().split('T')[0];
+            let yesterdayRain = 0, todayForecast = 0;
+            if (data.hourly && data.hourly.time) {
+                for (let i = 0; i < data.hourly.time.length; i++) {
+                    const dateStr = data.hourly.time[i].split('T')[0];
+                    const precipitation = data.hourly.precipitation[i] || 0;
+                    if (dateStr === todayStr) todayForecast += precipitation;
+                    else yesterdayRain += precipitation;
+                }
+            }
+            return { yesterdayRain: yesterdayRain.toFixed(1), todayForecast: todayForecast.toFixed(1) };
+        }
+
+        async function getHistoricalPrecipitation(latitude, longitude, threshold, hours) {
+            const startDate = new Date('2010-01-01');
+            const endDate = new Date();
+            endDate.setDate(endDate.getDate() - 4);
+            const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${latitude}&longitude=${longitude}&start_date=${formatDate(startDate)}&end_date=${formatDate(endDate)}&hourly=precipitation&timezone=Europe/Berlin`;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`Errore nel recuperare i dati storici.`);
+            const data = await response.json();
+            const processedData = processHistoricalData(data.hourly, startDate.getFullYear(), endDate.getFullYear(), threshold, hours);
+            return { ...processedData, startDate, endDate };
+        }
+
+        function getQuantile(sortedArr, q) {
+            const pos = (sortedArr.length - 1) * q;
+            const base = Math.floor(pos);
+            const rest = pos - base;
+            if (sortedArr[base + 1] !== undefined) {
+                return sortedArr[base] + rest * (sortedArr[base + 1] - sortedArr[base]);
+            } else {
+                return sortedArr[base];
+            }
+        }
+
+        function calculateBoxPlotStats(arr) {
+            if (arr.length === 0) return { min: 0, q1: 0, median: 0, q3: 0, max: 0 };
+            const sorted = [...arr].sort((a, b) => a - b);
+            return {
+                min: sorted[0],
+                q1: getQuantile(sorted, 0.25),
+                median: getQuantile(sorted, 0.5),
+                q3: getQuantile(sorted, 0.75),
+                max: sorted[sorted.length - 1]
+            };
+        }
+
+        function processHistoricalData(hourlyData, startYear, endYear, threshold, hours) {
+            const yearlyRainyDays = {};
+            const yearsInPeriod = [];
+            for (let y = startYear; y <= endYear; y++) {
+                yearsInPeriod.push(y);
+                yearlyRainyDays[y] = Array(12).fill(0);
+            }
+            const rainyDays = new Set();
+            if (hourlyData && hourlyData.time) {
+                for (let i = 0; i < hourlyData.time.length; i++) {
+                    const date = new Date(hourlyData.time[i]);
+                    const hour = date.getHours();
+                    const precipitation = hourlyData.precipitation[i];
+                    if (hours.includes(hour) && precipitation > threshold) {
+                        const dayIdentifier = new Date(date.getFullYear(), date.getMonth(), date.getDate()).toISOString();
+                        rainyDays.add(dayIdentifier);
+                    }
+                }
+            }
+            rainyDays.forEach(dayString => {
+                const date = new Date(dayString);
+                const year = date.getFullYear();
+                const month = date.getMonth();
+                if (yearlyRainyDays[year] !== undefined) yearlyRainyDays[year][month]++;
+            });
+
+            const monthlyBoxPlotData = [];
+            const now = new Date();
+            const currentMonth = now.getMonth();
+            
+            for (let month = 0; month < 12; month++) {
+                const monthData = [];
+                for (const year of yearsInPeriod) {
+                    // FIX: Per l'anno corrente (endYear), includi solo i dati dei mesi passati.
+                    if (year === endYear && month >= currentMonth) {
+                        continue; // Salta i mesi futuri dell'anno corrente
+                    }
+                    monthData.push(yearlyRainyDays[year][month]);
+                }
+                monthlyBoxPlotData.push(calculateBoxPlotStats(monthData));
+            }
+            
+            return { yearlyRainyDays, monthlyBoxPlotData };
+        }
+        
+        function displayResults(historicalData, realtimeData, threshold, hours) {
+            const { monthlyBoxPlotData, yearlyRainyDays, startDate, endDate } = historicalData;
+            
+            yesterdayRainElement.textContent = realtimeData.yesterdayRain;
+            todayForecastElement.textContent = realtimeData.todayForecast;
+            const totalMedianDays = monthlyBoxPlotData.reduce((sum, data) => sum + data.median, 0);
+            totalDaysElement.textContent = Math.round(totalMedianDays);
+            
+            methodologyTextElement.innerHTML = `<strong class="text-gray-400">Metodologia:</strong> La previsione si basa sulla <strong class="text-gray-300">distribuzione statistica (boxplot)</strong> dei dati storici (dal ${formatDateForDisplay(startDate)} al ${formatDateForDisplay(endDate)}).`;
+            definitionTextElement.innerHTML = `<strong class="text-gray-400">Definizione di "Giorno di Pioggia":</strong> Precipitazione > <strong class="text-gray-300">${threshold.toFixed(1)} mm</strong> in un'ora nelle fasce orarie: <strong class="text-gray-300">${formatHourRanges(hours)}</strong>.`;
+
+            resultsContainer.classList.remove('hidden');
+            
+            if (predictionChart) predictionChart.destroy();
+            predictionChart = new Chart(predictionChartCanvas, { 
+                type: 'boxplot', 
+                data: { 
+                    labels: ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'], 
+                    datasets: [{ 
+                        label: 'Distribuzione Giorni di Pioggia', 
+                        data: monthlyBoxPlotData, 
+                        backgroundColor: 'rgba(56, 189, 248, 0.6)', 
+                        borderColor: 'rgba(56, 189, 248, 1)', 
+                        borderWidth: 2,
+                        itemRadius: 2,
+                    }] 
+                }, 
+                options: { 
+                    responsive: true, maintainAspectRatio: false, 
+                    plugins: { legend: { display: false }, tooltip: { callbacks: {
+                        label: function(c) {
+                            const item = c.raw;
+                            return [
+                                `Max: ${item.max.toFixed(0)}`,
+                                `Q3: ${item.q3.toFixed(0)}`,
+                                `Mediana: ${item.median.toFixed(0)}`,
+                                `Q1: ${item.q1.toFixed(0)}`,
+                                `Min: ${item.min.toFixed(0)}`
+                            ];
+                        }
+                    }}}, 
+                    scales: { y: { beginAtZero: true, title: { display: true, text: 'Numero di Giorni', color: '#9ca3af' }, grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: '#d1d5db' } }, x: { grid: { display: false }, ticks: { color: '#d1d5db' } } } 
+                } 
+            });
+
+            if (historicalChart) historicalChart.destroy();
+            const colors = ['#38bdf8', '#a78bfa', '#facc15', '#4ade80', '#f87171', '#fb923c', '#ec4899', '#6366f1', '#f59e0b', '#10b981', '#ef4444', '#d946ef', '#0ea5e9', '#8b5cf6', '#eab308'];
+            const years = Object.keys(yearlyRainyDays).sort();
+            const datasets = years.map((year, index) => ({ label: year, data: yearlyRainyDays[year], borderColor: colors[index % colors.length], backgroundColor: colors[index % colors.length], fill: false, tension: 0.1 }));
+            historicalChart = new Chart(historicalChartCanvas, { type: 'line', data: { labels: ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'], datasets: datasets }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { color: '#d1d5db' } } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'Giorni di Pioggia Effettivi', color: '#9ca3af' }, grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: '#d1d5db' } }, x: { grid: { display: false }, ticks: { color: '#d1d5db' } } } } });
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.remove('hidden');
+            loader.classList.add('hidden');
+        }
+
+        function formatHourRanges(hours) {
+            if (hours.length === 0) return 'Nessuna';
+            if (hours.length === 24) return 'Tutto il giorno (0-23)';
+            const sorted = [...hours].sort((a, b) => a - b);
+            const ranges = [];
+            let start = sorted[0], end = sorted[0];
+            for (let i = 1; i < sorted.length; i++) {
+                if (sorted[i] === end + 1) { end = sorted[i]; } 
+                else { ranges.push(start === end ? `${start}` : `${start}-${end}`); start = sorted[i]; end = sorted[i]; }
+            }
+            ranges.push(start === end ? `${start}` : `${start}-${end}`);
+            return ranges.join(', ');
+        }
+
+        document.addEventListener('DOMContentLoaded', initializeUI);
+    </script>
+</body>
+</html>
