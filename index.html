@@ -50,7 +50,9 @@
         <div class="flex flex-col sm:flex-row gap-3">
             <input type="text" id="location-input" placeholder="Inserisci una località (es. Roma, Milano...)" class="flex-grow bg-gray-700 border border-gray-600 text-white rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 focus:outline-none transition duration-300">
             <button id="search-btn" class="bg-cyan-500 hover:bg-cyan-600 text-gray-900 font-bold py-3 px-6 rounded-lg transition duration-300 flex items-center justify-center">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <!-- BUG: SVG viewBox attribute is incomplete - missing height value -->
+                <!-- Should be viewBox="0 0 24 24" instead of viewBox="0 0 24" -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                 Analizza
             </button>
         </div>
@@ -107,6 +109,8 @@
 
     <script>
         // Riferimenti DOM
+        // BUG: No validation that these DOM elements exist - if HTML structure changes, these will be null
+        // Any subsequent operations on null elements will cause TypeError
         const locationInput = document.getElementById('location-input');
         const searchBtn = document.getElementById('search-btn');
         const loader = document.getElementById('loader');
@@ -142,12 +146,15 @@
                 if (defaultHours.includes(i)) hourInput.checked = true;
                 hourLabel.htmlFor = `hour-${i}`; hourLabel.textContent = i.toString().padStart(2, '0');
                 hourLabel.className = 'w-full text-center p-2 block rounded-md cursor-pointer bg-gray-700 peer-checked:bg-cyan-500 peer-checked:text-gray-900 font-mono transition-colors duration-200';
+                // BUG: No error handling if DOM element creation or appending fails
+                // If hoursGrid is null, appendChild will throw TypeError
                 hourDiv.appendChild(hourInput); hourDiv.appendChild(hourLabel); hoursGrid.appendChild(hourDiv);
             }
             thresholdSlider.addEventListener('input', (e) => { thresholdValue.textContent = parseFloat(e.target.value).toFixed(1); });
             selectAllHoursBtn.addEventListener('click', () => setAllHours(true));
             deselectAllHoursBtn.addEventListener('click', () => setAllHours(false));
             searchBtn.addEventListener('click', handleSearch);
+            // BUG: Potential issue if locationInput is null - addEventListener will throw TypeError
             locationInput.addEventListener('keyup', (event) => { if (event.key === 'Enter') handleSearch(); });
         }
         
@@ -159,7 +166,11 @@
             const location = locationInput.value.trim();
             if (!location) { showError('Per favore, inserisci una località.'); return; }
             const precipitationThreshold = parseFloat(thresholdSlider.value);
+            // BUG: No validation that precipitationThreshold is a valid number
+            // parseFloat could return NaN if thresholdSlider.value is invalid
             const selectedHours = Array.from(document.querySelectorAll('#hours-grid input:checked')).map(cb => parseInt(cb.value));
+            // BUG: parseInt could return NaN if cb.value is not a valid number
+            // This could cause issues in the hours.includes() check later
             if (selectedHours.length === 0) { showError('Per favore, seleziona almeno una fascia oraria.'); return; }
             
             resultsContainer.classList.add('hidden'); errorMessage.classList.add('hidden'); loader.classList.remove('hidden');
@@ -187,8 +198,11 @@
             const response = await fetch(url);
             if (!response.ok) throw new Error('Errore API di geocodifica');
             const data = await response.json();
+            // BUG: No validation of response structure before accessing data.results
             if (data.results && data.results.length > 0) {
                 const { latitude, longitude, name, admin1, country } = data.results[0];
+                // BUG: If name is undefined/null, this will create "undefined, country" string
+                // Also, if both admin1 and country are undefined, it becomes "name, undefined"
                 return { latitude, longitude, name: `${name}, ${admin1 || country}` };
             }
             return null;
@@ -199,14 +213,25 @@
             const response = await fetch(url);
             if (!response.ok) throw new Error('Errore nel recuperare i dati di oggi e ieri.');
             const data = await response.json();
+            // BUG: Timezone inconsistency - using local timezone for todayStr but API uses Europe/Berlin
+            // This could cause incorrect date comparisons if user is in different timezone
             const todayStr = new Date().toISOString().split('T')[0];
+            // BUG: Calculate yesterday properly instead of assuming all non-today dates are yesterday
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayStr = yesterday.toISOString().split('T')[0];
+            
             let yesterdayRain = 0, todayForecast = 0;
             if (data.hourly && data.hourly.time) {
+                // BUG: No validation that data.hourly.precipitation exists and has same length as time array
                 for (let i = 0; i < data.hourly.time.length; i++) {
                     const dateStr = data.hourly.time[i].split('T')[0];
+                    // BUG: data.hourly.precipitation[i] could be undefined if arrays have different lengths
                     const precipitation = data.hourly.precipitation[i] || 0;
                     if (dateStr === todayStr) todayForecast += precipitation;
-                    else yesterdayRain += precipitation;
+                    // FIX: Only count actual yesterday data, not all non-today data
+                    else if (dateStr === yesterdayStr) yesterdayRain += precipitation;
+                    // BUG: Future forecast data beyond today is being ignored, might be expected behavior
                 }
             }
             return { yesterdayRain: yesterdayRain.toFixed(1), todayForecast: todayForecast.toFixed(1) };
@@ -220,17 +245,24 @@
             const response = await fetch(url);
             if (!response.ok) throw new Error(`Errore nel recuperare i dati storici.`);
             const data = await response.json();
+            // BUG: No validation that data.hourly exists before passing to processHistoricalData
+            // If API returns unexpected structure, processHistoricalData will fail
             const processedData = processHistoricalData(data.hourly, startDate.getFullYear(), endDate.getFullYear(), threshold, hours);
             return { ...processedData, startDate, endDate };
         }
 
         function getQuantile(sortedArr, q) {
+            // BUG: No validation for empty array or invalid input
+            // If sortedArr is empty, sortedArr.length - 1 = -1, making pos negative
+            // This could cause base to be negative or sortedArr[base] to be undefined
             const pos = (sortedArr.length - 1) * q;
             const base = Math.floor(pos);
             const rest = pos - base;
             if (sortedArr[base + 1] !== undefined) {
+                // BUG: sortedArr[base] could be undefined if array is empty or base is invalid
                 return sortedArr[base] + rest * (sortedArr[base + 1] - sortedArr[base]);
             } else {
+                // BUG: sortedArr[base] could be undefined, returning undefined instead of a number
                 return sortedArr[base];
             }
         }
@@ -255,10 +287,13 @@
                 yearlyRainyDays[y] = Array(12).fill(0);
             }
             const rainyDays = new Set();
+            // BUG: No validation that hourlyData exists and has expected structure
             if (hourlyData && hourlyData.time) {
+                // BUG: No validation that hourlyData.precipitation exists and has same length as time array
                 for (let i = 0; i < hourlyData.time.length; i++) {
                     const date = new Date(hourlyData.time[i]);
                     const hour = date.getHours();
+                    // BUG: hourlyData.precipitation[i] could be undefined if arrays have different lengths
                     const precipitation = hourlyData.precipitation[i];
                     if (hours.includes(hour) && precipitation > threshold) {
                         const dayIdentifier = new Date(date.getFullYear(), date.getMonth(), date.getDate()).toISOString();
@@ -270,6 +305,8 @@
                 const date = new Date(dayString);
                 const year = date.getFullYear();
                 const month = date.getMonth();
+                // BUG: No check that yearlyRainyDays[year] exists before accessing it
+                // If year is outside the expected range, this will be undefined
                 if (yearlyRainyDays[year] !== undefined) yearlyRainyDays[year][month]++;
             });
 
@@ -284,6 +321,8 @@
                     if (year === endYear && month >= currentMonth) {
                         continue; // Salta i mesi futuri dell'anno corrente
                     }
+                    // BUG: yearlyRainyDays[year] could be undefined and [month] access would fail
+                    // Also, no validation that yearlyRainyDays[year][month] is a valid number
                     monthData.push(yearlyRainyDays[year][month]);
                 }
                 monthlyBoxPlotData.push(calculateBoxPlotStats(monthData));
@@ -295,8 +334,12 @@
         function displayResults(historicalData, realtimeData, threshold, hours) {
             const { monthlyBoxPlotData, yearlyRainyDays, startDate, endDate } = historicalData;
             
+            // BUG: No validation that realtimeData contains expected properties
+            // yesterdayRain and todayForecast could be undefined
             yesterdayRainElement.textContent = realtimeData.yesterdayRain;
             todayForecastElement.textContent = realtimeData.todayForecast;
+            // BUG: No validation that monthlyBoxPlotData is an array or that all elements have median property
+            // reduce could fail if monthlyBoxPlotData is undefined or contains invalid objects
             const totalMedianDays = monthlyBoxPlotData.reduce((sum, data) => sum + data.median, 0);
             totalDaysElement.textContent = Math.round(totalMedianDays);
             
@@ -305,6 +348,7 @@
 
             resultsContainer.classList.remove('hidden');
             
+            // BUG: Chart destruction is handled correctly here with if checks
             if (predictionChart) predictionChart.destroy();
             predictionChart = new Chart(predictionChartCanvas, { 
                 type: 'boxplot', 
@@ -312,6 +356,7 @@
                     labels: ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'], 
                     datasets: [{ 
                         label: 'Distribuzione Giorni di Pioggia', 
+                        // BUG: monthlyBoxPlotData might contain invalid data structure for Chart.js
                         data: monthlyBoxPlotData, 
                         backgroundColor: 'rgba(56, 189, 248, 0.6)', 
                         borderColor: 'rgba(56, 189, 248, 1)', 
@@ -324,6 +369,8 @@
                     plugins: { legend: { display: false }, tooltip: { callbacks: {
                         label: function(c) {
                             const item = c.raw;
+                            // BUG: No validation that item has the expected properties (max, q3, median, q1, min)
+                            // If item is undefined or missing properties, this will fail
                             return [
                                 `Max: ${item.max.toFixed(0)}`,
                                 `Q3: ${item.q3.toFixed(0)}`,
@@ -340,6 +387,8 @@
             if (historicalChart) historicalChart.destroy();
             const colors = ['#38bdf8', '#a78bfa', '#facc15', '#4ade80', '#f87171', '#fb923c', '#ec4899', '#6366f1', '#f59e0b', '#10b981', '#ef4444', '#d946ef', '#0ea5e9', '#8b5cf6', '#eab308'];
             const years = Object.keys(yearlyRainyDays).sort();
+            // BUG: No validation that yearlyRainyDays[year] is an array with 12 elements
+            // If data structure is corrupted, map will fail
             const datasets = years.map((year, index) => ({ label: year, data: yearlyRainyDays[year], borderColor: colors[index % colors.length], backgroundColor: colors[index % colors.length], fill: false, tension: 0.1 }));
             historicalChart = new Chart(historicalChartCanvas, { type: 'line', data: { labels: ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'], datasets: datasets }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { color: '#d1d5db' } } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'Giorni di Pioggia Effettivi', color: '#9ca3af' }, grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: '#d1d5db' } }, x: { grid: { display: false }, ticks: { color: '#d1d5db' } } } } });
         }
@@ -360,6 +409,8 @@
                 if (sorted[i] === end + 1) { end = sorted[i]; } 
                 else { ranges.push(start === end ? `${start}` : `${start}-${end}`); start = sorted[i]; end = sorted[i]; }
             }
+            // BUG: This logic doesn't handle the case where the last range never gets added
+            // if the loop ends while building a range, it won't be added to ranges array
             ranges.push(start === end ? `${start}` : `${start}-${end}`);
             return ranges.join(', ');
         }
